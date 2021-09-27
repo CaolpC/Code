@@ -33,6 +33,12 @@
 - Git
   - [Git](git/git.md)
 
+- Java
+  - [AbstractQueuedSynchronizer](document-java/JUC/AbstractQueuedSynchronizer.md)
+  - [AQS](document-java/JUC/AQS.md)
+  - [AQSNote](document-java/JUC/AQSNote.md)
+  - [JMM](document-java/JUC/JMM.md)
+
 - **Links**
 - [![code](https://icongr.am/clarity/link.svg?size=16&color=808080) 个人博客](https://www.51it.wang)
 - [![code](https://icongr.am/clarity/link.svg?size=16&color=808080) 申请友链](#)
