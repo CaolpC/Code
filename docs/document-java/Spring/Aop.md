@@ -132,3 +132,10 @@ private final Map<String, ObjectFactory<?>> singletonFactories = new HashMap<>(1
 /** Cache of early singleton objects: bean name to bean instance. */
 private final Map<String, Object> earlySingletonObjects = new HashMap<>(16);
 ```
+
+循环依赖文字版描述
+
+1. A 创建过程中需要 B, 于是 A 将自己放到三级缓存里边取，去实例化 B
+2. B 实例化的过程中发现需要 A, 于是 B 先查一级缓存，没有，再查二级缓存，还是没有，再查三级缓存，找到 A, 然后把三级缓存中的 A 放入到二级缓存中，并且删除三级缓存中的A
+3. B 顺利初始化完毕，将自己放到一级缓存里边，此时 B 中的 A 仍然是创建中状态，然后回来接着创建 A，此时 B 已经创建结束，直接从一级缓存里边拿到 B, 然后完成创建，并将 A 自己放到一级缓存里面
+

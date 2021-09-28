@@ -339,5 +339,4 @@ public class BiasedLockToLightLock {
 ![20210926143314](https://cdn.jsdelivr.net/gh/RamboCao/PicGo/images/20210926143314.png)
 ![20210926143728](https://cdn.jsdelivr.net/gh/RamboCao/PicGo/images/20210926143728.png)
 
-线程之间的切换会导致对象的锁由偏向锁变成轻量锁
-
+线程之间的切换(其实是线程之间锁抢占)会导致对象的锁由偏向锁变成轻量锁
