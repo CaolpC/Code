@@ -17,7 +17,15 @@ SQL> shutdown immediate;
 SQL> startup    启动服务
 SQL> alter pluggable database bosspdb open;
 如果不执行这个，dataGrip连接的时候会报：ora-01033:oracle initialization or shutdown in progress；
+
+如果是机器重启，那么需要重新进行监听
+启动监听
+lsnrctl start
+lsnrctl reload
+lsnrctl status
 ```
+
+![20211008153747](https://cdn.jsdelivr.net/gh/RamboCao/PicGo/images/20211008153747.png)
 
 ### SQL 字符串截取函数
 ```sql
