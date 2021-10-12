@@ -40,6 +40,9 @@
   - [JMM](document-java/JUC/JMM.md)
   - [JMM](document-java/Lock/Lock.md)
 
+- JUC
+  - [对象头以及锁](document-java/Lock/ObjectHeaderLock.md)
+
 - **Links**
 - [![code](https://icongr.am/clarity/link.svg?size=16&color=808080) 个人博客](https://www.51it.wang)
-- [![code](https://icongr.am/clarity/link.svg?size=16&color=808080) 申请友链](#)
+- [![code](https://icongr.am/clarity/link.svg?size=16&color=808080) 申请友链](https://baidu.com)
