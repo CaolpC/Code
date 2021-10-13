@@ -117,3 +117,43 @@ SUNION key [key ...]
 微信朋友圈点赞：`SADD` 点赞，`SREM` 取消点赞, 点赞用户数统计 `SCARD`, 判断用户是否点赞过 `SMEMBERS`, 展示所有的 `SMEMBERS`
 微薄的好友关注关系: 交集，并集，差集等等，共同关注, 我关注的人也关注他
 QQ 可能认识的人
+
+## Zset
+
+有序的集合中加入一个元素和这个元素的分数
+
+ZADD key score member [socre member]
+
+zset 应用
+
+根据商品的销售对商品进行排序显示
+抖音热搜
+
+## 分布式锁
+
+你知道分布式锁吗？有哪些实现方案？redis 分布式锁的理解，删 key 的时候有什么问题
+
+JVM 层面的加锁
+
+分布式微服务架构，拆分后各个微服务之间为了避免冲突数据故障而加入的一种锁，分布式锁
+
+三种分布式锁
+
+1. mysql
+2. zookeeper
+3. redis
+
+现在习惯用 redis 做分布式锁
+
+redis -> redlock -> redisson lock/unlock 方法
+
+Redlock 是一种理念，redisson 是一种落地实现
+
+自己手写需要 setnx + lua 脚本首先
+
+RedisCluster -> redisson
+
+为什么使用 redisson？
+
+1. 单机版没有加锁，增加 synchronized/ReentrantLock，两者区别，不见不散/过时不候， synchronized 导致线程积压，线程大量等待/放弃等待，拿不到锁规定时间内放弃，ReentrantLock 是有条件的等待，小规模的等待 lock.tryLock()
+2. 

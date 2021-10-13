@@ -220,6 +220,374 @@ public class TestObjectHeaderBiasedLock {
 
 ### 重量级锁
 
+### 批量重偏向
+
+设置 JVM 参数 -XX:+PringFlagsFinal，在项目启动时，可以看到 JVM 的默认参数值
+
+![20211013134530](https://cdn.jsdelivr.net/gh/RamboCao/PicGo/images/20211013134530.png)
+
+```yaml
+intx BiasedLockingBulkRebiasThreshold = 20   默认偏向锁批量重偏向阈值
+intx BiasedLockingBulkRevokeThreshold = 40   默认偏向锁批量撤销阈值
+```
+
+为什么会有批量重偏向和批量撤销:question:
+
+当一个线程创建了大量的对象，并执行了初始的同步操作后，另外一个线程也将这些对象作为锁对象进行操作，会导致偏向锁重偏向的操作，这里的重偏向指的时 偏向锁(偏向 A) -> 轻量锁 -> 偏向锁(B)
+
+***重偏向是对类的优化***
+
+1. 如果有很多对象，这些对象都是由同一个类（假设为 A）实例化，被线程 t1 访问，对象头 Mark Word 中偏向线程记录的都是线程 t1
+2. 之后线程 t2 来访问这些对象，发现对象头 Mark Word 中的偏向线程 id 都不是自己，所以此时锁会升级成轻量锁，锁升级过程不可逆
+
+上述锁升级的操作是一个很耗时的操作，因此 JVM 对此进行了优化：当对象数量超过某个阈值时，Java 会对阈值之外的对象做批量重偏向线程 t2，所以前20个对象都是轻量锁，后面的对象都是偏向锁，偏向线程 t2
+
+代码展示：
+
+```java
+public class ReBiasedLock {
+    public static void main(String[] args) throws InterruptedException {
+
+        // 延时 5s，开启偏向锁功能
+        TimeUnit.SECONDS.sleep(5);
+        // 创建 100 个偏向线程 t1 的偏向锁
+        List<User> locks = new ArrayList<>();
+
+        Thread t1 = new Thread(() ->{
+            for (int i = 0; i < 100; i++) {
+                User user = new User(String.valueOf(i),i);
+                synchronized (user){
+                    locks.add(user);
+                }
+            }
+            //为了防止JVM线程复用，在创建完对象后，保持线程t1状态为存活
+            try {
+                Thread.sleep(1000000000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
+
+        t1.start();
+
+        Thread.sleep(3000);
+        System.out.println("打印t1线程，list中第20个对象的对象头：");
+        System.out.println(ClassLayout.parseInstance(locks.get(19)).toPrintable());
+
+        // 创建线程 t2 竞争线程 t1 已经退出同步块的锁
+        Thread t2 = new Thread(() -> {
+            // 这里边值循环了30次
+            for (int i = 0; i < 30; i++) {
+                User user = locks.get(i);
+                synchronized (user){
+                    if (i == 18 || i == 19){
+                        System.out.println(Thread.currentThread().getName() + " : " + i + " 锁");
+                        System.out.println(ClassLayout.parseInstance(locks.get(i)).toPrintable());
+                    }
+                }
+            }
+
+            try {
+                Thread.sleep(10000000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+        });
+
+        t2.start();
+
+        Thread.sleep(3000);
+        System.out.println(("打印 locks 中第11个对象的对象头："));
+        System.out.println((ClassLayout.parseInstance(locks.get(10)).toPrintable()));
+        System.out.println("打印 locks 中第26个对象的对象头：");
+        System.out.println((ClassLayout.parseInstance(locks.get(25)).toPrintable()));
+        System.out.println("打印 locks 中第41个对象的对象头：");
+        System.out.println((ClassLayout.parseInstance(locks.get(40)).toPrintable()));
+    }
+}
+```
+
+执行结果分析
+
+首先创建了 100 个偏向线程 t1 的偏向锁，锁标志 101，偏向线程 t1：-1604823035
+
+```result
+打印 t1 线程，locks 中第20个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           05 58 58 a0 (00000101 01011000 01011000 10100000) (-1604823035)
+      4     4                     (object header)                           19 02 00 00 (00011001 00000010 00000000 00000000) (537)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  19
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+
+```
+
+线程 t2，前 19 次偏向都产生了轻量锁，锁标识 00
+
+```result
+t2 : 18 锁
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           20 f2 2f e8 (00100000 11110010 00101111 11101000) (-399511008)
+      4     4                     (object header)                           59 00 00 00 (01011001 00000000 00000000 00000000) (89)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  18
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+```
+
+第 20 次的时候，达到了批量重偏向的阈值 20，此时锁并不是轻量锁，而是变成了偏向锁，锁标识 101，偏向线程 t2: -1603421947
+
+```result
+t2 : 19 锁
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           05 b9 6d a0 (00000101 10111001 01101101 10100000) (-1603421947)
+      4     4                     (object header)                           19 02 00 00 (00011001 00000010 00000000 00000000) (537)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  19
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+```
+
+前 20 个对象没有触发批量重偏向机制，线程 t2 释放同步锁之后，转变成无锁状态
+
+第 20~30 个对象，出发了批量重偏向机制，对象为偏向锁状态，偏向线程 t2，t2 线程 id 为：-1603421947
+
+第 31 个对象之后，也没有触发批量重偏向机制，对象仍然偏向于线程 t1，t1线程 id 为：-1604823035
+
+```result
+打印 locks 中第11个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           01 00 00 00 (00000001 00000000 00000000 00000000) (1)
+      4     4                     (object header)                           00 00 00 00 (00000000 00000000 00000000 00000000) (0)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  10
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+
+打印 locks 中第26个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           05 b9 6d a0 (00000101 10111001 01101101 10100000) (-1603421947)
+      4     4                     (object header)                           19 02 00 00 (00011001 00000010 00000000 00000000) (537)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  25
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+
+打印 locks 中第41个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           05 58 58 a0 (00000101 01011000 01011000 10100000) (-1604823035)
+      4     4                     (object header)                           19 02 00 00 (00011001 00000010 00000000 00000000) (537)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  40
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+
+```
+
+### 批量撤销
+
+多线程竞争激烈的情况下，使用偏向锁会降低效率，于是乎产生了批量撤销机制
+
+代码展示
+
+```java
+public class BiasedLockRevoke {
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread.sleep(5000);
+
+        List<User> locks = new ArrayList<>();
+
+        Thread t1 = new Thread(() ->{
+            for (int i = 0; i < 100; i++) {
+                User user = new User(String.valueOf(i), i);
+                synchronized (user){
+                    locks.add(user);
+                }
+            }
+
+            try {
+                Thread.sleep(100000000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }, "t1");
+
+        t1.start();
+
+        Thread.sleep(3000);
+
+        Thread t2 = new Thread(() ->{
+            // 40 次，达到了批量撤销的阈值
+            for (int i = 0; i < 40; i++) {
+                User user = locks.get(i);
+                synchronized (user){
+
+                }
+            }
+
+            try {
+                Thread.sleep(100000000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }, "t2");
+
+        t2.start();
+
+        Thread.sleep(3000);
+        System.out.println("打印 locks 中第11个对象的对象头：");
+        System.out.println((ClassLayout.parseInstance(locks.get(10)).toPrintable()));
+        System.out.println("打印 locks 中第26个对象的对象头：");
+        System.out.println((ClassLayout.parseInstance(locks.get(25)).toPrintable()));
+        System.out.println("打印 locks 中第90个对象的对象头：");
+        System.out.println((ClassLayout.parseInstance(locks.get(89)).toPrintable()));
+
+        Thread t3 = new Thread(() -> {
+            for (int i = 20; i < 40; i++) {
+                User user = locks.get(i);
+                synchronized (user){
+                    if (i == 20 || i == 22){
+                        System.out.println("thread 3 第 " + i + " 次");
+                        System.out.println(ClassLayout.parseInstance(user).toPrintable());
+                    }
+                }
+            }
+        }, "t3");
+
+        t3.start();
+
+        Thread.sleep(10000);
+        System.out.println("重新输出实例 User");
+        System.out.println(ClassLayout.parseInstance(new User("new", 101)).toPrintable());
+    }
+}
+```
+
+执行结果分析：
+
+前 20 个对象，没有触发批量重偏向机制，线程 t2 执行释放同步锁之后，转变为无锁状态
+
+```result
+打印 locks 中第11个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           01 00 00 00 (00000001 00000000 00000000 00000000) (1)
+      4     4                     (object header)                           00 00 00 00 (00000000 00000000 00000000 00000000) (0)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  10
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+```
+
+第 20~40 个对象，触发了批量重偏向机制，对象为偏向锁状态，偏向线程 t2，线程 t2 id 为 1741091077
+
+```result
+打印 locks 中第26个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           05 f1 c6 67 (00000101 11110001 11000110 01100111) (1741091077)
+      4     4                     (object header)                           cb 01 00 00 (11001011 00000001 00000000 00000000) (459)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  25
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+```
+
+第 41 个对象之后，也没有触发批量重偏向机制，对象仍然偏向于线程 t1，线程 t1 id 为 1741084677
+
+```result
+打印 locks 中第90个对象的对象头：
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           05 d8 c6 67 (00000101 11011000 11000110 01100111) (1741084677)
+      4     4                     (object header)                           cb 01 00 00 (11001011 00000001 00000000 00000000) (459)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  89
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+```
+
+线程 t3 开始竞争锁，此时已经达到批量偏向锁撤销的阈值 40， 对象 locks.get(20) 和 locks.get(22) 已经进行过偏向锁的重偏向，所以并不会再次重偏向 t3
+
+***此时触发批量撤销，对象锁膨胀变为轻量级锁，这里是偏向撤销的位置***
+
+```result
+thread 3 第 20 次
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           30 f4 2f 57 (00110000 11110100 00101111 01010111) (1462760496)
+      4     4                     (object header)                           c1 00 00 00 (11000001 00000000 00000000 00000000) (193)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  20
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+
+thread 3 第 22 次
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           30 f4 2f 57 (00110000 11110100 00101111 01010111) (1462760496)
+      4     4                     (object header)                           c1 00 00 00 (11000001 00000000 00000000 00000000) (193)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  22
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+```
+
+最后生成的新对象 User
+***本应该为可偏向状态偏向锁的新对象，经历了批量重偏向和批量撤销之后实例直接转换成无锁***
+
+```result
+重新输出实例 User
+com.object.header.User object internals:
+ OFFSET  SIZE                TYPE DESCRIPTION                               VALUE
+      0     4                     (object header)                           01 00 00 00 (00000001 00000000 00000000 00000000) (1)
+      4     4                     (object header)                           00 00 00 00 (00000000 00000000 00000000 00000000) (0)
+      8     4                     (object header)                           43 c1 00 f8 (01000011 11000001 00000000 11111000) (-134168253)
+     12     4    java.lang.String User.name                                 (object)
+     16     4   java.lang.Integer User.age                                  101
+     20     4                     (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+
+```
+
+### 批量撤销和批量重偏向总结
+
+二者都是针对类的优化，和对象无关
+偏向锁重偏向一次之后不可再次重偏向
+当某个类触发批量撤销机制之后，JVM 默认当前类产生了严重的问题，剥夺了该类的新实例对象使用偏向锁的权利，这里严重的问题
+
 ### JVM 同步指令分析
 
 #### monitorenter
